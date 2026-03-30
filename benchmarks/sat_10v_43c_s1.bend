@@ -4,54 +4,42 @@
 # both branches of every variable decision simultaneously.
 #
 # Data representation:
-#   Assignment: List of values, index = var_id (1-based, index 0 unused)
-#     0 = unset, 1 = true, 2 = false
-#   Literal encoding: var v positive = v*2, var v negative = v*2+1
-#   Clause: List of encoded literals
+#   Assignment: Map from var_id → value (0=unset, 1=true, 2=false)
+#     IMPORTANT: All variable keys must be pre-initialized to 0.
+#     Map/get on missing keys returns 'unreachable' (ERA), which
+#     poisons arithmetic. Pre-initialization avoids this.
+#   Literal: DIMACS encoding (positive = var true, negative = var false)
+#   Clause: List of literals
 #   Formula: List of clauses
 #
 # This file is used as a template. The cnf_to_bend.py converter
 # generates a complete .bend program by appending a main() function
 # that embeds the specific CNF formula.
 
-# --- List-based assignment (duplicable in HVM, unlike Map) ---
+# --- Helpers ---
 
-def list_get(xs, i):
-  match xs:
-    case List/Nil:
-      return 0
-    case List/Cons:
-      if i == 0:
-        return xs.head
-      else:
-        return list_get(xs.tail, i - 1)
-
-def list_set(xs, i, v):
-  match xs:
-    case List/Nil:
-      if i == 0:
-        return List/Cons { head: v, tail: List/Nil }
-      else:
-        return List/Cons { head: 0, tail: list_set(List/Nil, i - 1, v) }
-    case List/Cons:
-      if i == 0:
-        return List/Cons { head: v, tail: xs.tail }
-      else:
-        return List/Cons { head: xs.head, tail: list_set(xs.tail, i - 1, v) }
-
-def zeros(n):
-  if n == 0:
-    return []
+def abs(x):
+  if x < 0:
+    return (0 - x)
   else:
-    return List/Cons { head: 0, tail: zeros(n - 1) }
+    return x
+
+# Initialize map with keys 0..n all set to 0
+def init_map(n):
+  if n == 0:
+    return {0: 0}
+  else:
+    m = init_map(n - 1)
+    m[n] = 0
+    return m
 
 # --- Literal evaluation ---
+# Uses DIMACS encoding: positive literal = var true, negative = var false
 
 def eval_lit(asgn, lit):
-  v = lit / 2
-  neg = lit % 2
-  val = list_get(asgn, v)
-  if neg == 0:
+  v = abs(lit)
+  val = asgn[v]
+  if lit > 0:
     return val
   else:
     if val == 0:
@@ -102,8 +90,6 @@ def eval_formula(asgn, formula):
         return eval_formula(asgn, formula.tail)
 
 # --- Unit propagation ---
-# Find a clause with exactly one unset literal (all others false).
-# Returns the literal to propagate, or 0 if none found.
 
 def find_unit_in_clause(asgn, clause, unset_count, unset_lit):
   match clause:
@@ -136,16 +122,15 @@ def find_unit(asgn, formula):
       else:
         return find_unit(asgn, formula.tail)
 
-# Apply unit propagation: set the literal's variable to satisfy it
 def propagate_lit(asgn, lit):
-  v = lit / 2
-  neg = lit % 2
-  if neg == 0:
-    return list_set(asgn, v, 1)
+  v = abs(lit)
+  if lit > 0:
+    asgn[v] = 1
+    return asgn
   else:
-    return list_set(asgn, v, 2)
+    asgn[v] = 2
+    return asgn
 
-# Iterative unit propagation (up to max_steps to prevent infinite loops)
 def unit_propagate(asgn, formula, steps):
   if steps == 0:
     return asgn
@@ -163,14 +148,13 @@ def pick_var(asgn, var, num_vars):
   if var > num_vars:
     return 0
   else:
-    val = list_get(asgn, var)
+    val = asgn[var]
     if val == 0:
       return var
     else:
       return pick_var(asgn, var + 1, num_vars)
 
 # --- DPLL Solver ---
-# The core parallel algorithm.
 # At each decision point, HVM automatically evaluates both branches
 # (var=TRUE and var=FALSE) across available CPU cores.
 
@@ -189,8 +173,10 @@ def dpll(formula, asgn, num_vars):
       return 0
     else:
       # PARALLEL BRANCH: HVM runs both simultaneously
-      asgn_t = list_set(asgn2, v, 1)
-      asgn_f = list_set(asgn2, v, 2)
+      asgn_t = asgn2
+      asgn_t[v] = 1
+      asgn_f = asgn2
+      asgn_f[v] = 2
       left = dpll(formula, asgn_t, num_vars)
       right = dpll(formula, asgn_f, num_vars)
       if left == 1:
@@ -198,10 +184,11 @@ def dpll(formula, asgn, num_vars):
       else:
         return right
 
+
 # Generated from: /home/box/GW/bend-sat-solver/benchmarks/sat_10v_43c_s1.cnf
 # Variables: 10, Clauses: 43
 
 def main():
-  formula = [[6, 5, 10], [14, 9, 4], [20, 3, 17], [4, 13, 2], [15, 9, 21], [16, 19, 9], [11, 3, 15], [7, 11, 5], [18, 15, 9], [18, 15, 2], [6, 13, 18], [6, 19, 14], [10, 14, 6], [8, 18, 21], [13, 17, 11], [15, 19, 6], [3, 16, 13], [16, 13, 15], [21, 13, 17], [19, 7, 5], [10, 2, 4], [10, 9, 20], [4, 7, 19], [10, 16, 12], [12, 14, 9], [8, 14, 2], [7, 16, 15], [19, 16, 9], [13, 14, 2], [3, 10, 5], [6, 15, 11], [20, 9, 17], [20, 18, 2], [14, 9, 16], [17, 2, 12], [7, 9, 12], [15, 9, 11], [13, 19, 16], [2, 5, 6], [12, 18, 10], [21, 17, 6], [15, 5, 21], [12, 5, 15]]
-  asgn = zeros(11)
+  formula = [[3, -2, 5], [7, -4, 2], [10, -1, -8], [2, -6, 1], [-7, -4, -10], [8, -9, -4], [-5, -1, -7], [-3, -5, -2], [9, -7, -4], [9, -7, 1], [3, -6, 9], [3, -9, 7], [5, 7, 3], [4, 9, -10], [-6, -8, -5], [-7, -9, 3], [-1, 8, -6], [8, -6, -7], [-10, -6, -8], [-9, -3, -2], [5, 1, 2], [5, -4, 10], [2, -3, -9], [5, 8, 6], [6, 7, -4], [4, 7, 1], [-3, 8, -7], [-9, 8, -4], [-6, 7, 1], [-1, 5, -2], [3, -7, -5], [10, -4, -8], [10, 9, 1], [7, -4, 8], [-8, 1, 6], [-3, -4, 6], [-7, -4, -5], [-6, -9, 8], [1, -2, 3], [6, 9, 5], [-10, -8, 3], [-7, -2, -10], [6, -2, -7]]
+  asgn = init_map(10)
   return dpll(formula, asgn, 10)

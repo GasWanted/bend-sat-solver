@@ -44,17 +44,9 @@ def parse_dimacs(filename):
 
     return num_vars, num_clauses, clauses
 
-def encode_literal(lit):
-    """Encode a DIMACS literal to our format: var*2 for positive, var*2+1 for negative."""
-    if lit > 0:
-        return lit * 2
-    else:
-        return (-lit) * 2 + 1
-
 def clause_to_bend(clause):
-    """Convert a clause to Bend list syntax."""
-    encoded = [str(encode_literal(lit)) for lit in clause]
-    return "[" + ", ".join(encoded) + "]"
+    """Convert a clause to Bend list syntax using DIMACS literals directly."""
+    return "[" + ", ".join(str(lit) for lit in clause) + "]"
 
 def formula_to_bend(clauses):
     """Convert the entire formula to Bend nested list syntax."""
@@ -74,11 +66,6 @@ def main():
     with open(solver_path, 'r') as f:
         solver_code = f.read()
 
-    # Remove the comment about main() being appended
-    solver_code = solver_code.rstrip()
-    if solver_code.endswith("# main() is appended by cnf_to_bend.py with the specific formula"):
-        solver_code = solver_code[:solver_code.rfind("#")].rstrip()
-
     # Generate the Bend program
     print(solver_code)
     print()
@@ -87,7 +74,7 @@ def main():
     print()
     print("def main():")
     print(f"  formula = {formula_to_bend(clauses)}")
-    print(f"  asgn = zeros({num_vars + 1})")
+    print(f"  asgn = init_map({num_vars})")
     print(f"  return dpll(formula, asgn, {num_vars})")
 
 if __name__ == "__main__":
